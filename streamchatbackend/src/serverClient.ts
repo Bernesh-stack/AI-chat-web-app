@@ -10,3 +10,4 @@ if(!apiKey || !apiSecret) {
 
 
 export const serverClient = new StreamChat(apiKey, apiSecret);
+ 

@@ -18,20 +18,54 @@ export class OpenAIResponseHandler{
         private readonly chatClient:StreamChat,
         private readonly channel:Channel,
         private readonly messsage:MessageResponse,
-        private readonly onDisposel:()=>void,
+        private readonly onDispose:()=>void,
 
 
     ){
-        this.chatClient.on("ai_indicator.stop",this.handleStop)
+        this.chatClient.on("ai_indicator.stop",this.handleStopGenerating)
 
     }
      run = async()=>{}
-     dispose= () =>{}
-    private handleStop = async(event:Event)=>{}
+     dispose= () =>{
+        if(this.is_done){
+            return;
+        }
+        this.is_done = true;
+        this.chatClient.off("ai_indicator.stop",this.handleStopGenerating)
+        this.onDispose()
+     }
+    private handleStopGenerating = async(event:Event)=>{
+        if(this.is_done|| event.message_id !== this.messsage.id){
+            return;
+        }
+        console.log("Stopping generating for message ",this.messsage.id);
+        if(!this.openai || !this.openAiThread||!this.run_id ){
+            return;
+        
+        }
+        try {
+            await this.openai.beta.threads.runs.cancel(
+                this.openAiThread.id,
+                { run_id: this.run_id } as any,
+                
+            )
+            
+        } catch (error) {
+            console.error("Failed to cancel run:",error);
+            
+        }
+        await this.channel.sendEvent({
+            type:"ai_indicator.stop",
+            cid:this.messsage.cid,
+            message_id:this.messsage.id
+        });
+        await this.dispose();
+    
+    }
     private handleStreamEvent = async(event:Event)=>{}
     private handleError = async(error:Error)=>{
         if(this.is_done){
-            return 
+            return ;
         }
         await this.channel.sendEvent({
             type:"ai_indicator.error",
@@ -45,6 +79,8 @@ export class OpenAIResponseHandler{
                 messsage:error.toString()
             }
         })
+        await  this.dispose();
+
     }
     private performWebSearch = async(query:string):Promise<string>=>{
       const TAVILIY_API_KEY =   process.env.TAVILIY_API_KEY;

@@ -4,7 +4,7 @@ import type { AssistantStream } from "openai/lib/AssistantStream";
 import type{Channel,Event,MessageResponse,StreamChat} from "stream-chat";
 
 export class OpenAIResponseHandler{
-    private messsage_text ="";
+    private message_text = "";
     private chunk_counter = 0;
     private run_id = "";
     private is_done = false;
@@ -25,7 +25,9 @@ export class OpenAIResponseHandler{
         this.chatClient.on("ai_indicator.stop",this.handleStopGenerating)
 
     }
-     run = async()=>{}
+     run = async()=>{
+        
+     }
      dispose= () =>{
         if(this.is_done){
             return;
@@ -62,13 +64,66 @@ export class OpenAIResponseHandler{
         await this.dispose();
     
     }
-    private handleStreamEvent = async(event:Event)=>{}
+    private handleStreamEvent = async(event:OpenAI.Beta.Assistants.AssistantStreamEvent)=>{
+        const{cid,id}=this.messsage
+
+        if(event.event === "thread.run.created"){
+            this.run_id = event.data.id;
+
+        }
+        else if(event.event === "thread.message.delta"){
+            const textDelta = event.data.delta.content?.[0];
+            if(textDelta?.type ==="text"&&textDelta.text){
+                this.messsage.text+=textDelta.text.value||"";
+                const now = Date.now();
+                if(now-this.last_update_time >10_000){
+                    this.chatClient.partialUpdateMessage(id,{
+                        set:{
+                            text:this.messsage.text
+                        }
+
+                    })
+                    this.last_update_time = now;
+
+                }
+                this.chunk_counter++;
+
+
+
+        }
+    }
+    else if(event.event === "thread.message.completed"){
+        this.chatClient.partialUpdateMessage(id,{
+            set:{
+                text:event.data.content[0].type ==="text"?event.data.content[0].text.value:this.message_text,
+            }
+        })
+        this.channel.sendEvent({
+            type:"ai_indicator.clear",
+            cid:cid,
+            message_id:id
+        
+        })
+    }
+    else if(event.event === "thread.run.step.created"){
+        if(event.data.step_details.type ==="message_creation"){
+            this.channel.sendEvent({
+                type:"ai_indicator.update",
+
+                message_id:id,
+                ai_state:"AI_STATE_GENERATING"
+            })
+        }
+
+    }
+}
+
     private handleError = async(error:Error)=>{
         if(this.is_done){
             return ;
         }
         await this.channel.sendEvent({
-            type:"ai_indicator.error",
+            type:"ai_indicator.clear",
             ai_state:"AI_STATE_ERROR",
             cid:this.messsage.cid,
             message_id:this.messsage.id
